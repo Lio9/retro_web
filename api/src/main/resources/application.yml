@@ -1,0 +1,45 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: nds-save-api
+  # 默认 H2 便于本地零配置启动；生产用 PostgreSQL
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:h2:file:./data/api-db;MODE=PostgreSQL}
+    username: ${SPRING_DATASOURCE_USERNAME:sa}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+    driver-class-name: ${SPRING_DATASOURCE_DRIVER:org.h2.Driver}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  web:
+    resources:
+      # 由 Spring Boot 同源托管前端，消除 CORS
+      static-locations: file:./public/,file:../,classpath:/static/
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:dev-only-change-me-32-bytes-minimum-secret!!}
+  cors:
+    allowed-origins: ${APP_CORS_ORIGINS:*}
+  save:
+    storage-dir: ${APP_SAVE_DIR:./data/saves}
+  ra:
+    api-base: ${RA_API_BASE:https://retroachievements.org}
+    api-key: ${RA_API_KEY:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    com.retroweb: INFO

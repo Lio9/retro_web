@@ -1,0 +1,184 @@
+<!-- AI生成 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>NovaDS</title>
+  <meta name="description" content="纯净网页主机模拟器" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+<p data-aigc-mark="1" style="margin:0 0 8px;font-size:10px;line-height:1.3;color:#6b6560;font-weight:400;">AI生成</p>
+
+
+  <!-- 顶栏 -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true"><span></span><span></span></div>
+      <div>
+        <div class="brand-name">NovaDS</div>
+      </div>
+      <div class="brand-sub" id="top-sub">READY</div>
+    </div>
+    <div class="top-actions">
+      <span class="pill off" id="ra-pill" title="RetroAchievements"><i></i><span>RA</span></span>
+      <button class="icon-btn" id="btn-stop" type="button" title="停止" disabled>■</button>
+      <button class="icon-btn" id="btn-menu" type="button" title="菜单">☰</button>
+    </div>
+  </header>
+
+  <!-- 主舞台 -->
+  <main class="stage">
+    <div class="empty-state" id="empty-state" role="button" tabindex="0">
+      <div class="empty-cart" aria-hidden="true"></div>
+      <div class="empty-title">Load Cartridge</div>
+      <div class="empty-hint">点击此处或右上角菜单<br />选择 ROM / 打开游戏文件夹</div>
+    </div>
+
+    <div class="game-wrap" id="game-wrap" hidden>
+      <div id="game-host" aria-label="游戏画面"></div>
+      <div class="stage-bar">
+        <button class="btn-ghost" id="btn-menu-2" type="button">菜单</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- 抽屉：全部功能 -->
+  <div class="drawer-backdrop" id="drawer-backdrop"></div>
+  <aside class="drawer" id="drawer" aria-label="设置菜单">
+    <div class="drawer-head">
+      <h2>Menu</h2>
+      <button class="icon-btn" id="btn-close-drawer" type="button" aria-label="关闭">×</button>
+    </div>
+    <div class="drawer-body">
+
+      <section>
+        <p class="section-title">Game</p>
+        <div class="file-row" id="rom-row">
+          <span>ROM 文件</span>
+          <span class="name" id="rom-name">未选择</span>
+          <input type="file" id="rom-input" multiple accept=".nds,.gba,.nes,.sfc,.smc,.gb,.gbc,.md,.gen,.sms,.gg,.n64,.z64,.v64,.bin,.cue,.pce,.lnx,.ws,.wsc,.ngp,.zip" />
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" id="btn-open-folder" type="button">打开游戏文件夹</button>
+          <button class="btn-primary" id="btn-start" type="button" disabled>启动</button>
+        </div>
+        <p class="hint" style="margin-top:8px">
+          推荐文件夹方式：自动读取同目录 <code>游戏名.sav</code>，保存后写回原位。
+        </p>
+      </section>
+
+      <section>
+        <p class="section-title">System</p>
+        <div class="field">
+          <label for="system-select">主机</label>
+          <select id="system-select"></select>
+          <div class="note" id="system-note">—</div>
+        </div>
+        <div class="field">
+          <label for="core-select">核心</label>
+          <select id="core-select"></select>
+          <div class="note" id="core-note">—</div>
+        </div>
+      </section>
+
+      <section>
+        <p class="section-title">BIOS · 可选</p>
+        <details class="mini">
+          <summary>自备 BIOS（不强制）</summary>
+          <div style="margin-top:10px">
+            <div class="file-row" id="bios7-row">
+              <span>bios7.bin · NDS</span>
+              <span class="name" id="bios7-name">未选择</span>
+              <input type="file" id="bios7-input" accept=".bin" />
+            </div>
+            <div class="file-row" id="bios9-row">
+              <span>bios9.bin · NDS</span>
+              <span class="name" id="bios9-name">未选择</span>
+              <input type="file" id="bios9-input" accept=".bin" />
+            </div>
+            <div class="file-row" id="fw-row">
+              <span>firmware.bin · NDS</span>
+              <span class="name" id="fw-name">未选择</span>
+              <input type="file" id="fw-input" accept=".bin" />
+            </div>
+            <div class="file-row" id="extra-bios-row">
+              <span>其他 BIOS</span>
+              <span class="name" id="extra-bios-name">未选择</span>
+              <input type="file" id="extra-bios-input" accept=".bin,.rom,.img" />
+            </div>
+            <p class="hint">仅使用自有主机导出的 BIOS，本程序不分发。</p>
+          </div>
+        </details>
+      </section>
+
+      <section>
+        <p class="section-title">RetroAchievements</p>
+        <dl class="kv">
+          <dt>账号</dt><dd id="ra-user-stat">未登录</dd>
+          <dt>哈希</dt><dd id="ra-hash-stat">—</dd>
+          <dt>游戏</dt><dd id="ra-game-stat">—</dd>
+          <dt>成就</dt><dd id="ra-ach-stat">—</dd>
+        </dl>
+        <div class="btn-row" style="margin-top:10px">
+          <button class="btn-ghost" id="btn-ra-open" type="button">登录</button>
+          <button class="btn-ghost" id="btn-ra-logout" type="button" disabled>退出</button>
+        </div>
+        <div class="ach-list" id="ra-ach-list" style="margin-top:10px">加载 ROM 后自动识别。</div>
+      </section>
+
+      <section>
+        <p class="section-title">Status</p>
+        <div class="chips" id="status-chips">
+          <span class="chip" id="chip-mode">core —</span>
+          <span class="chip" id="chip-state">idle</span>
+          <span class="chip" id="chip-sav">sav auto</span>
+        </div>
+      </section>
+
+      <section>
+        <p class="section-title">Log</p>
+        <div class="log-box" id="log"></div>
+      </section>
+
+      <section>
+        <p class="hint">
+          <a href="plan.html">技术规划</a>
+          · 通过本地 HTTP 或部署访问
+        </p>
+      </section>
+    </div>
+  </aside>
+
+  <!-- RA 登录弹窗 -->
+  <div class="modal" id="ra-modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card" role="dialog">
+      <h2>RetroAchievements</h2>
+      <p class="sub">可选登录，用于同步成就。</p>
+      <div class="field">
+        <label for="ra-user">用户名</label>
+        <input id="ra-user" type="text" autocomplete="username" />
+      </div>
+      <div class="field">
+        <label for="ra-pass">密码 / API Key</label>
+        <input id="ra-pass" type="password" autocomplete="current-password" />
+      </div>
+      <div class="err" id="ra-modal-error"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost" type="button" data-close>取消</button>
+        <button class="btn-primary" id="ra-login-btn" type="button">登录</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="emu/systems.js"></script>
+  <script src="emu/ejs-loader.js"></script>
+  <script src="storage/game-folder.js"></script>
+  <script src="storage/save-store.js"></script>
+  <script src="achievements/ra-api.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

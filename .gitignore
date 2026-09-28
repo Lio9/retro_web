@@ -1,0 +1,25 @@
+# 构建与依赖
+node_modules/
+target/
+package-lock.json
+
+# 运行数据与密钥（仓库根与 api/data）
+/data/
+/api/data/
+*.log
+.env
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# 测试产物
+_tmp_uploads/
+_qa*.py
+_qa*.png
+_ui*.png
+
+# 用户 ROM / 存档（请勿提交版权文件）
+roms/*
+!roms/.gitkeep
+*.sav

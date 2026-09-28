@@ -1,0 +1,1403 @@
+<!-- AI生成 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>网页版 NDS 模拟器 · 架构与落地路线图</title>
+  <meta name="description" content="melonDS WASM + Java 云存档 + RetroAchievements 成就系统的完整技术规划：架构、路线图、代码骨架、合规与部署。" />
+  <link rel="stylesheet" href="plan.css" />
+</head>
+<body>
+<p data-aigc-mark="1" style="margin:0 0 8px;font-size:10px;line-height:1.3;color:#6b6560;font-weight:400;">AI生成</p>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span></div>
+        <div>NDS Web Emulator Blueprint</div>
+      </div>
+      <nav class="top-nav" aria-label="章节导航">
+        <a href="#architecture">架构</a>
+        <a href="#roadmap">路线图</a>
+        <a href="#stack">选型</a>
+        <a href="#code">代码骨架</a>
+        <a href="#compliance">RA 合规</a>
+        <a href="#deploy">部署</a>
+        <a href="#risks">风险</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="toc" aria-label="目录">
+      <p class="toc-title">目录</p>
+      <a href="#goals">0. 目标与原则</a>
+      <a href="#architecture">1. 总体架构</a>
+      <a href="#roadmap">2. 分阶段路线图</a>
+      <a href="#stack">3. 技术选型</a>
+      <a href="#code">4. 关键代码骨架</a>
+      <a href="#compliance">5. 中文 ROM 与 RA 合规</a>
+      <a href="#deploy">6. 部署方案</a>
+      <a href="#risks">7. 风险与注意事项</a>
+      <a href="#alternatives">8. 省力替代方案</a>
+      <a href="#checklist">9. 启动清单</a>
+    </aside>
+
+    <main class="content">
+      <div class="hero">
+        <div class="eyebrow">可落地技术规划 · 面向 Java 后端开发者</div>
+        <h1>网页版 NDS 模拟器<br />云存档 + RetroAchievements 全链路</h1>
+        <p class="hero-lead">
+          以 melonDS WASM 为核心、Java（Spring Boot）负责云同步与账号、rcheevos 负责成就评估。
+          本页给出架构关系、分阶段路线、技术选型、可复制的代码骨架、合规红线与部署建议——
+          目标是复用成熟开源组件，而不是从零写模拟器。
+        </p>
+        <div class="hero-grid">
+          <div class="hero-chip">
+            <strong>前端</strong>
+            <span>WASM 模拟器 · 双屏渲染 · 键盘/触摸 · IndexedDB 存档</span>
+          </div>
+          <div class="hero-chip">
+            <strong>后端（你的主场）</strong>
+            <span>Spring Boot · PostgreSQL · 对象存储 · 存档版本冲突处理</span>
+          </div>
+          <div class="hero-chip">
+            <strong>成就层</strong>
+            <span>rcheevos rc_client · RA Connect API · 严格哈希校验</span>
+          </div>
+        </div>
+        <div class="note-meta">
+          <span>文档定位：Phase 0 规划交付物</span>
+          <span>适用：个人/小团队上线</span>
+          <span>原则：合规优先 · 先跑通再优化 · 后端做重逻辑</span>
+        </div>
+      </div>
+
+      <!-- ========== 0. 目标与原则 ========== -->
+      <section class="card" id="goals">
+        <h2>0. 目标、范围与硬约束</h2>
+        <p class="section-lead">
+          先把「做什么 / 不做什么」钉死，避免在 RA 合规和模拟器细节上走弯路。
+        </p>
+
+        <h3>产品目标（按优先级）</h3>
+        <ol>
+          <li><strong>浏览器内稳定运行 NDS 游戏</strong>：双屏、键盘映射、可选触摸、基本 60fps（桌面 Chromium 优先）。</li>
+          <li><strong>本地存档可靠持久化</strong>：游戏内保存写入 IndexedDB，可导出/导入 <code>.sav</code>。</li>
+          <li><strong>云端存档同步</strong>：Java 后端提供上传/下载/列表 API，跨设备恢复。</li>
+          <li><strong>接入 RetroAchievements</strong>：游戏中实时解锁并上报，遵守官方反作弊规则。</li>
+        </ol>
+
+        <h3>明确不做（红线）</h3>
+        <ul>
+          <li><span class="tag forbid">禁止</span>伪造 ROM 哈希、双 ROM 切换「补进度」、内存改写刷成就。</li>
+          <li><span class="tag forbid">禁止</span>内置作弊码 / 金手指 / 任意内存编辑器并用于 Hardcore。</li>
+          <li><span class="tag forbid">禁止</span>分发任何商业 ROM、BIOS、固件；一律用户本地自备。</li>
+          <li><span class="tag forbid">禁止</span>把「汉化 ROM 当英文原版上报」当作产品能力宣传或实现。</li>
+        </ul>
+
+        <div class="callout danger">
+          <strong>合规底线（必须写进 README 与 UI）</strong>
+          RA 只认数据库内登记的 ROM 哈希。汉化/修改版若无官方新哈希，成就系统会正确地拒绝解锁——
+          这是预期行为，不是 bug。产品应引导用户走「翻译补丁哈希申请」官方流程，而不是绕过校验。
+        </div>
+
+        <h3>成功标准（可验收）</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>阶段</th>
+                <th>验收标准</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>P0 模拟器</td>
+                <td>加载合法自备 NDS ROM，双屏显示，键盘可操作，主菜单/进游戏无崩溃</td>
+              </tr>
+              <tr>
+                <td>P1 本地存档</td>
+                <td>游戏内存档后刷新页面仍在；可导出 <code>.sav</code> 并在另一浏览器导入恢复</td>
+              </tr>
+              <tr>
+                <td>P2 后端账号</td>
+                <td>注册/登录、JWT 会话、存档上传下载 API 可用 Postman 验证</td>
+              </tr>
+              <tr>
+                <td>P3 云同步</td>
+                <td>两台设备同一账号，版本冲突可检测并提示，不静默覆盖</td>
+              </tr>
+              <tr>
+                <td>P4 成就</td>
+                <td>英文原版 ROM 可解锁成就并出现在 RA 网站；Hardcore 规则生效</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ========== 1. 架构 ========== -->
+      <section class="card" id="architecture">
+        <h2>1. 总体架构图</h2>
+        <p class="section-lead">
+          三条主线：浏览器内模拟器运行时、Java 云存档服务、RA 成就集成层。
+          成就评估尽量在客户端（rcheevos WASM）完成，后端只做账号、存档与可信上报通道。
+        </p>
+
+        <div class="diagram" role="img" aria-label="NDS 网页模拟器三层架构图">
+          <svg viewBox="0 0 680 560" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6" fill="none" stroke="#2563eb" stroke-width="1.2" />
+              </marker>
+            </defs>
+            <rect width="680" height="560" fill="#fafafa"/>
+            <text x="340" y="28" text-anchor="middle" font-size="14" font-weight="600" fill="#1c1917">网页版 NDS 模拟器 · 系统架构</text>
+
+            <!-- Frontend -->
+            <rect x="36" y="52" width="608" height="168" rx="10" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+            <text x="56" y="76" font-size="13" font-weight="600" fill="#1e3a8a">前端 · 浏览器运行时</text>
+
+            <rect x="56" y="92" width="132" height="52" rx="8" fill="#fff" stroke="#93c5fd"/>
+            <text x="122" y="114" text-anchor="middle" font-size="11" fill="#1c1917">melonDS WASM</text>
+            <text x="122" y="130" text-anchor="middle" font-size="10" fill="#78716c">NDS 核心</text>
+
+            <rect x="202" y="92" width="132" height="52" rx="8" fill="#fff" stroke="#93c5fd"/>
+            <text x="268" y="114" text-anchor="middle" font-size="11" fill="#1c1917">双屏 Canvas</text>
+            <text x="268" y="130" text-anchor="middle" font-size="10" fill="#78716c">256×192 ×2</text>
+
+            <rect x="348" y="92" width="132" height="52" rx="8" fill="#fff" stroke="#93c5fd"/>
+            <text x="414" y="114" text-anchor="middle" font-size="11" fill="#1c1917">输入映射</text>
+            <text x="414" y="130" text-anchor="middle" font-size="10" fill="#78716c">键盘 / 触摸</text>
+
+            <rect x="494" y="92" width="132" height="52" rx="8" fill="#fff" stroke="#93c5fd"/>
+            <text x="560" y="114" text-anchor="middle" font-size="11" fill="#1c1917">IndexedDB</text>
+            <text x="560" y="130" text-anchor="middle" font-size="10" fill="#78716c">.sav / 状态</text>
+
+            <rect x="56" y="158" width="570" height="44" rx="8" fill="#fff" stroke="#93c5fd"/>
+            <text x="341" y="176" text-anchor="middle" font-size="11" fill="#1c1917">UI 层：ROM 加载 · 存档管理 · 成就面板 · 设置</text>
+            <text x="341" y="192" text-anchor="middle" font-size="10" fill="#78716c">用户不接触内存地址；一切能力用服务封装</text>
+
+            <!-- Arrows FE to BE -->
+            <line x1="220" y1="220" x2="180" y2="270" stroke="#2563eb" stroke-width="1.2" marker-end="url(#arrow)"/>
+            <line x1="340" y1="220" x2="340" y2="270" stroke="#2563eb" stroke-width="1.2" marker-end="url(#arrow)"/>
+            <text x="360" y="250" font-size="10" fill="#2563eb">HTTPS / JWT</text>
+
+            <!-- Backend -->
+            <rect x="36" y="278" width="608" height="140" rx="10" fill="#ecfdf5" stroke="#0f766e" stroke-width="1.2"/>
+            <text x="56" y="302" font-size="13" font-weight="600" fill="#0f766e">Java 后端 · Spring Boot</text>
+
+            <rect x="56" y="318" width="150" height="78" rx="8" fill="#fff" stroke="#5eead4"/>
+            <text x="131" y="344" text-anchor="middle" font-size="11" fill="#1c1917">Auth / 用户</text>
+            <text x="131" y="362" text-anchor="middle" font-size="10" fill="#78716c">JWT · OAuth 可选</text>
+            <text x="131" y="378" text-anchor="middle" font-size="10" fill="#78716c">Spring Security</text>
+
+            <rect x="222" y="318" width="150" height="78" rx="8" fill="#fff" stroke="#5eead4"/>
+            <text x="297" y="344" text-anchor="middle" font-size="11" fill="#1c1917">Save Sync API</text>
+            <text x="297" y="362" text-anchor="middle" font-size="10" fill="#78716c">版本号 + 冲突检测</text>
+            <text x="297" y="378" text-anchor="middle" font-size="10" fill="#78716c">乐观锁 / ETag</text>
+
+            <rect x="388" y="318" width="110" height="78" rx="8" fill="#fff" stroke="#5eead4"/>
+            <text x="443" y="348" text-anchor="middle" font-size="11" fill="#1c1917">PostgreSQL</text>
+            <text x="443" y="366" text-anchor="middle" font-size="10" fill="#78716c">元数据/版本</text>
+
+            <rect x="514" y="318" width="110" height="78" rx="8" fill="#fff" stroke="#5eead4"/>
+            <text x="569" y="348" text-anchor="middle" font-size="11" fill="#1c1917">MinIO / S3</text>
+            <text x="569" y="366" text-anchor="middle" font-size="10" fill="#78716c">存档 blob</text>
+
+            <!-- Arrows BE to RA -->
+            <line x1="420" y1="418" x2="340" y2="452" stroke="#2563eb" stroke-width="1.2" marker-end="url(#arrow)"/>
+            <line x1="220" y1="220" x2="420" y2="452" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/>
+            <text x="430" y="448" font-size="10" fill="#2563eb">解锁事件</text>
+
+            <!-- RA layer -->
+            <rect x="36" y="430" width="608" height="104" rx="10" fill="#fff1f2" stroke="#be123c" stroke-width="1.2"/>
+            <text x="56" y="454" font-size="13" font-weight="600" fill="#be123c">RA 集成层 · RetroAchievements</text>
+
+            <rect x="56" y="468" width="170" height="48" rx="8" fill="#fff" stroke="#fda4af"/>
+            <text x="141" y="490" text-anchor="middle" font-size="11" fill="#1c1917">rcheevos WASM</text>
+            <text x="141" y="506" text-anchor="middle" font-size="10" fill="#78716c">rc_client 本地评估</text>
+
+            <rect x="242" y="468" width="170" height="48" rx="8" fill="#fff" stroke="#fda4af"/>
+            <text x="327" y="490" text-anchor="middle" font-size="11" fill="#1c1917">内存读接口</text>
+            <text x="327" y="506" text-anchor="middle" font-size="10" fill="#78716c">只读 peek，禁止 poke</text>
+
+            <rect x="428" y="468" width="196" height="48" rx="8" fill="#fff" stroke="#fda4af"/>
+            <text x="526" y="490" text-anchor="middle" font-size="11" fill="#1c1917">RA Connect API</text>
+            <text x="526" y="506" text-anchor="middle" font-size="10" fill="#78716c">登录 · 游戏 · 成就上报</text>
+          </svg>
+        </div>
+
+        <h3>数据流（关键路径）</h3>
+        <ol>
+          <li><strong>启动游戏</strong>：用户本地选择 <code>.nds</code>（可选 BIOS/FW）→ WASM 加载 ROM → 双屏渲染循环启动。</li>
+          <li><strong>输入</strong>：键盘/触摸映射为 NDS 按键位 → 写入模拟器输入寄存器状态。</li>
+          <li><strong>存档</strong>：游戏内保存 → 核心导出 SRAM/flash 为 <code>.sav</code> 字节 → 写 IndexedDB（防抖，如 2s）→ 可选推送云端。</li>
+          <li><strong>云同步</strong>：客户端带 <code>revision</code> 上传 → 后端比较版本 → 成功则 <code>revision+1</code>，冲突则 409 并返回双方元数据。</li>
+          <li><strong>成就</strong>：每帧/定时读游戏内存 → rcheevos <code>rc_client</code> 评估 → 解锁事件 → 存本地 + 调 RA API 上报（经后端代理更稳妥）。</li>
+        </ol>
+
+        <div class="callout ok">
+          <strong>职责切分建议</strong>
+          你的 Java 优势应该花在：账号、存档版本、配额、限流、RA token 保管、审计日志。
+          模拟器帧循环、成就表达式求值都留在浏览器 WASM，不要用 Java 再包一层模拟器。
+        </div>
+      </section>
+
+      <!-- ========== 2. 路线图 ========== -->
+      <section class="card" id="roadmap">
+        <h2>2. 分阶段实现路线图</h2>
+        <p class="section-lead">
+          五个阶段串行推进，每个阶段都有独立可演示的产出。估算按兼职/熟悉 Java 的开发者：每阶段约 1–2 周有效工作量。
+        </p>
+
+        <div class="roadmap">
+          <div class="phase">
+            <div class="phase-id">
+              <div class="num">P0</div>
+              <div class="dur">约 1 周</div>
+            </div>
+            <div class="phase-body">
+              <h3>跑通模拟器核心</h3>
+              <p class="goal">目标：浏览器里能玩起来。不做账号、不做云、不做成就。</p>
+              <ul>
+                <li>选定并构建 melonDS WASM（或先用现成可运行的 web 移植验证）。</li>
+                <li>页面加载 ROM / 可选 BIOS 与 firmware。</li>
+                <li>双屏 Canvas 渲染 + 键盘映射 + 基础音效开关。</li>
+                <li>固定时间步（60fps）主循环，暂停/重置可用。</li>
+                <li><strong>产出：</strong><code>index.html</code> + 核心封装 <code>emu/melon-bridge.js</code>。</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="phase">
+            <div class="phase-id">
+              <div class="num">P1</div>
+              <div class="dur">约 3–5 天</div>
+            </div>
+            <div class="phase-body">
+              <h3>本地存档（IndexedDB + .sav）</h3>
+              <p class="goal">目标：关掉浏览器进度不丢，能备份恢复。</p>
+              <ul>
+                <li>捕获电池存档字节（SRAM/Flash），写入 IndexedDB。</li>
+                <li>自动保存防抖 + 手动「立即保存」。</li>
+                <li>导出 <code>.sav</code> / 导入 <code>.sav</code>；显示最近保存时间与大小。</li>
+                <li>用「游戏标识」做键：优先 ROM 哈希，其次文件名+大小（需提示不够精确）。</li>
+                <li><strong>产出：</strong><code>storage/save-store.js</code>、UI 存档面板。</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="phase">
+            <div class="phase-id">
+              <div class="num">P2</div>
+              <div class="dur">约 1–2 周</div>
+            </div>
+            <div class="phase-body">
+              <h3>Java 后端与账号</h3>
+              <p class="goal">目标：Spring Boot 服务可部署，JWT 登录，存档 API 契约定稿。</p>
+              <ul>
+                <li>Spring Boot 3.x + PostgreSQL：用户、游戏档案、存档元数据表。</li>
+                <li>登录/注册（先邮箱密码即可）；JWT（或 Session Cookie）。</li>
+                <li>存档上传/下载/列表 API；blob 存 MinIO 或先存 PG <code>bytea</code>（规模小可接受）。</li>
+                <li>版本字段 <code>revision</code> + 乐观锁，冲突返回 409。</li>
+                <li><strong>产出：</strong>OpenAPI 文档、Docker Compose（api + postgres + minio）。</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="phase">
+            <div class="phase-id">
+              <div class="num">P3</div>
+              <div class="dur">约 1 周</div>
+            </div>
+            <div class="phase-body">
+              <h3>云存档同步</h3>
+              <p class="goal">目标：跨设备恢复可靠，冲突不丢档。</p>
+              <ul>
+                <li>登录后启动对比本地/云端 <code>revision</code> 与时间戳。</li>
+                <li>策略：新设备下载 → 玩一会 → 上传；冲突弹窗「保留本地 / 用云端 / 两者都导出」。</li>
+                <li>上传失败重试、网络中断队列；限速与单档大小上限。</li>
+                <li>审计：谁在何时覆盖了哪一版。</li>
+                <li><strong>产出：</strong>同步状态条、冲突对话框、同步测试用例。</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="phase">
+            <div class="phase-id">
+              <div class="num">P4</div>
+              <div class="dur">约 1–2 周</div>
+            </div>
+            <div class="phase-body">
+              <h3>RetroAchievements 接入</h3>
+              <p class="goal">目标：英文原版可实时解锁成就；Hardcore 规则生效；汉化路径合规。</p>
+              <ul>
+                <li>集成 rcheevos（WASM 或经现有封装），<code>rc_client</code> 加载游戏与成就定义。</li>
+                <li>实现只读内存 peek 回调；禁止任何写内存接口暴露给成就层。</li>
+                <li>ROM 哈希识别 → 匹配 RA game id → 拉取成就列表 → 帧末评估 → 解锁 toast。</li>
+                <li>登录 RA（建议经你的后端代理，API Key/Web API 不暴露在前端）。</li>
+                <li>Hardcore：禁用即时存档/快进/作弊；Softcore 允许存档。</li>
+                <li><strong>产出：</strong>成就面板、解锁通知、合规说明页、汉化 ROM 引导流程。</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <h3>阶段依赖关系</h3>
+        <div class="callout">
+          <strong>顺序建议</strong>
+          P0 → P1 可完全离线交付；P2 可在 P1 同步开发 API（接口先定契约）；P3 依赖 P2；
+          P4 只读依赖 P0 的内存访问接口，但不依赖云存档。因此 P4 可与 P3 并行，前提是 ROM 哈希识别已经可用。
+        </div>
+      </section>
+
+      <!-- ========== 3. 选型 ========== -->
+      <section class="card" id="stack">
+        <h2>3. 技术选型建议</h2>
+        <p class="section-lead">
+          优先选社区已验证组件。标注「必须」「推荐」「可选」；备选写在同一行，便于你按熟练度替换。
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>层</th>
+                <th>选择</th>
+                <th>理由</th>
+                <th>备选</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>NDS 核心</td>
+                <td><span class="tag must">必须</span>melonDS WASM（Emscripten）</td>
+                <td>兼容性/准确度优于多数 JS 核心；DS Anywhere 等项目证明可在 Web 跑</td>
+                <td>DeSmuME-wasm（维护/速度通常不如 melonDS）</td>
+              </tr>
+              <tr>
+                <td>WASM 构建</td>
+                <td><span class="tag must">必须</span>Emscripten + CMake</td>
+                <td>官方成熟工具链，便于导出 <code>ccall</code>/Memory 视图</td>
+                <td>WASI/clang 手工链接（不建议）</td>
+              </tr>
+              <tr>
+                <td>前端框架</td>
+                <td><span class="tag rec">推荐</span>原生 HTML/CSS/JS 或 Vite + 轻量框架</td>
+                <td>你前端基础有限，复杂状态管理会拖慢进度</td>
+                <td>React/Vue（若团队已熟）</td>
+              </tr>
+              <tr>
+                <td>本地存储</td>
+                <td><span class="tag must">必须</span>IndexedDB（经 idb 封装）</td>
+                <td>可存大二进制；LocalStorage 只适合配置</td>
+                <td>OPFS（更大文件、现代浏览器）</td>
+              </tr>
+              <tr>
+                <td>成就库</td>
+                <td><span class="tag must">必须</span>rcheevos（rc_client）</td>
+                <td>RA 官方评估库，支持 WASM 绑定</td>
+                <td>自行实现解析（禁止：极易违规）</td>
+              </tr>
+              <tr>
+                <td>后端</td>
+                <td><span class="tag must">必须</span>Spring Boot 3.x + Java 17+</td>
+                <td>你的技术栈；生态完整</td>
+                <td>无</td>
+              </tr>
+              <tr>
+                <td>数据库</td>
+                <td><span class="tag rec">推荐</span>PostgreSQL</td>
+                <td>JSONB + 乐观锁 + 对象存储元数据都合适</td>
+                <td>MySQL 8（亦可）</td>
+              </tr>
+              <tr>
+                <td>对象存储</td>
+                <td><span class="tag rec">推荐</span>MinIO（自建）或 S3 兼容</td>
+                <td>存档 blob 与元数据分离，方便备份</td>
+                <td>小规模先 PG bytea</td>
+              </tr>
+              <tr>
+                <td>鉴权</td>
+                <td><span class="tag rec">推荐</span>Spring Security + JWT</td>
+                <td>前后端分离清晰；注意刷新与吊销</td>
+                <td>Session Cookie（更简单，同域部署）</td>
+              </tr>
+              <tr>
+                <td>前端托管</td>
+                <td><span class="tag rec">推荐</span>Cloudflare Pages / Vercel</td>
+                <td>静态资源 CDN 免费额度友好</td>
+                <td>Nginx 自建</td>
+              </tr>
+              <tr>
+                <td>后端托管</td>
+                <td><span class="tag rec">推荐</span>Railway / Fly.io / 自有服务器</td>
+                <td>Java 长驻进程友好；国内访问注意延迟</td>
+                <td>阿里云/腾讯云 ECS + Docker</td>
+              </tr>
+              <tr>
+                <td>构建</td>
+                <td><span class="tag opt">可选</span>Vite + npm scripts</td>
+                <td>开发体验好，产物纯静态</td>
+                <td>无打包，直接静态目录</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>关于 melonDS WASM 获取路径</h3>
+        <div class="split">
+          <div class="mini-card">
+            <h4>路径 A：社区现成 Web 移植（先跑通）</h4>
+            <ul>
+              <li>寻找 DS Anywhere / melonDS-wasm 等开源演示，研究其胶水层。</li>
+              <li>直接复用其 <code>.js/.wasm</code> 与 API 形状，替换 UI。</li>
+              <li>优点：几天能玩起来；缺点：API 可能不完整，存档钩子要自己补。</li>
+            </ul>
+          </div>
+          <div class="mini-card">
+            <h4>路径 B：自己 Emscripten 编译 melonDS（可控）</h4>
+            <ul>
+              <li>克隆 melonDS，用 Emscripten 工具链编译核心。</li>
+              <li>显式导出：加载 ROM、步进帧、读帧缓冲、读写 SRAM、按键。</li>
+              <li>优点：接口干净，便于 rcheevos peek；缺点：编译环境折腾。</li>
+            </ul>
+          </div>
+        </div>
+        <div class="callout warn">
+          <strong>现实建议</strong>
+          P0 用路径 A 验证产品方向；一旦要认真做 RA 和云存档，再切到路径 B 拥有稳定 C API。
+          不要同时维护两套核心。
+        </div>
+      </section>
+
+      <!-- ========== 4. 代码 ========== -->
+      <section class="card" id="code">
+        <h2>4. 关键代码骨架</h2>
+        <p class="section-lead">
+          以下骨架按「能对接」为目标，不是可直接复制粘贴的完整实现。
+          接口名以你最终选用的 WASM 导出为准，但职责边界建议保持不变。
+        </p>
+
+        <h3>4.1 加载 melonDS WASM 并渲染双屏</h3>
+        <pre><code>// emu/melon-bridge.js —— 双屏渲染与主循环骨架
+export class MelonBridge {
+  constructor({ topCanvas, bottomCanvas }) {
+    this.topCanvas = topCanvas;
+    this.bottomCanvas = bottomCanvas;
+    this.topCtx = topCanvas.getContext("2d");
+    this.bottomCtx = bottomCanvas.getContext("2d");
+    this.running = false;
+    this._raf = 0;
+    this._saveDebounceMs = 2000;
+    this._onSave = null;
+    this._onFrame = null;
+  }
+
+  // 1) 初始化 WASM 模块（替换为你构建产物的加载函数）
+  async init(wasmUrl) {
+    // 假设 Emscripten 导出 createModule
+    this.mod = await createModule({
+      locateFile: (p) =&gt; new URL(p, wasmUrl).href,
+      canvas: this.topCanvas, // 部分移植用单 canvas 叠双屏
+    });
+    this.HEAPU8 = () =&gt; this.mod.HEAPU8;
+  }
+
+  // 2) 加载 ROM（用户文件 -&gt; 字节 -&gt; 核心）
+  async loadRom(file) {
+    const buf = new Uint8Array(await file.arrayBuffer());
+    // 示例：导出 cwrap 接口；名字以实际导出为准
+    const ptr = this.mod._malloc(buf.length);
+    this.mod.HEAPU8.set(buf, ptr);
+    this.mod._nds_load_rom(ptr, buf.length);
+    this.mod._free(ptr);
+    this.romId = await this.computeRomId(buf); // 用于存档键与 RA 哈希
+  }
+
+  // 3) 双屏绘制：NDS 原生 256x192 x2
+  blitFrame() {
+    // 从核心帧缓冲读 RGB565/RGBA，分别画到上下屏
+    const w = 256, h = 192;
+    const topPtr = this.mod._nds_framebuffer_top();
+    const botPtr = this.mod._nds_framebuffer_bottom();
+    const top = new ImageData(
+      new Uint8ClampedArray(this.mod.HEAPU8.buffer, topPtr, w * h * 4), w, h
+    );
+    const bot = new ImageData(
+      new Uint8ClampedArray(this.mod.HEAPU8.buffer, botPtr, w * h * 4), w, h
+    );
+    this.topCtx.putImageData(top, 0, 0);
+    this.bottomCtx.putImageData(bot, 0, 0);
+    this._onFrame &amp;&amp; this._onFrame();
+  }
+
+  // 4) 固定 60fps 步进；用 rAF 对齐显示器刷新
+  start() {
+    if (this.running) return;
+    this.running = true;
+    let acc = 0, last = performance.now();
+    const step = () =&gt; {
+      if (!this.running) return;
+      const now = performance.now();
+      acc += now - last;
+      last = now;
+      // 1000/60 ≈ 16.67ms 一帧
+      while (acc &gt;= 16.67) {
+        this.mod._nds_run_frame();
+        acc -= 16.67;
+      }
+      this.blitFrame();
+      this._raf = requestAnimationFrame(step);
+    };
+    this._raf = requestAnimationFrame(step);
+  }
+
+  stop() {
+    this.running = false;
+    cancelAnimationFrame(this._raf);
+  }
+
+  // 5) 输入：把浏览器键位映射为 NDS 按键位图
+  bindKeyboard(map = defaultKeyMap) {
+    const held = new Set();
+    window.addEventListener("keydown", (e) =&gt; {
+      if (held.has(e.code)) return;
+      held.add(e.code);
+      const bit = map[e.code];
+      if (bit != null) {
+        e.preventDefault();
+        this.mod._nds_set_input(bit, 1);
+      }
+    });
+    window.addEventListener("keyup", (e) =&gt; {
+      held.delete(e.code);
+      const bit = map[e.code];
+      if (bit != null) this.mod._nds_set_input(bit, 0);
+    });
+  }
+
+  // 触摸：底屏坐标转内部分辨率
+  bindTouch(bottomCanvas) {
+    const toLocal = (ev) =&gt; {
+      const r = bottomCanvas.getBoundingClientRect();
+      const x = ((ev.clientX - r.left) / r.width) * 256;
+      const y = ((ev.clientY - r.top) / r.height) * 192;
+      return { x: Math.floor(x), y: Math.floor(y) };
+    };
+    bottomCanvas.addEventListener("pointerdown", (ev) =&gt; {
+      const { x, y } = toLocal(ev);
+      this.mod._nds_touch(x, y, 1);
+      bottomCanvas.setPointerCapture(ev.pointerId);
+    });
+    bottomCanvas.addEventListener("pointermove", (ev) =&gt; {
+      if (!ev.buttons) return;
+      const { x, y } = toLocal(ev);
+      this.mod._nds_touch(x, y, 1);
+    });
+    bottomCanvas.addEventListener("pointerup", () =&gt; {
+      this.mod._nds_touch(0, 0, 0);
+    });
+  }
+
+  async computeRomId(bytes) {
+    // 优先用稳定哈希（MD5/CRC32）。RA 自身用特定算法，后面单独做 RA 识别。
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return [...new Uint8Array(digest)].map((b) =&gt; b.toString(16).padStart(2, "0")).join("");
+  }
+
+  onFrame(fn) { this._onFrame = fn; }
+}
+
+const defaultKeyMap = {
+  ArrowUp: 0, ArrowDown: 1, ArrowLeft: 2, ArrowRight: 3,
+  KeyX: 4, KeyZ: 5, KeyA: 6, KeyS: 7,
+  Enter: 8, ShiftLeft: 9, // Start / Select
+  KeyQ: 10, KeyW: 11,     // L / R
+};</code></pre>
+
+        <h3>4.2 捕获 .sav 存档数据</h3>
+        <p>
+          NDS「电池存档」通常是 SRAM / Flash / EEPROM 映射在核心内部。
+          正确做法是通过 WASM 导出的 <strong>只读导出接口</strong> 拿到连续字节，不要手算内部结构体偏移。
+        </p>
+        <pre><code>// storage/save-store.js —— 本地 .sav 持久化骨架
+export class SaveStore {
+  constructor(dbName = "nds-web-emu") {
+    this.dbName = dbName;
+    this.dbPromise = this.open();
+  }
+
+  open() {
+    return new Promise((resolve, reject) =&gt; {
+      const req = indexedDB.open(this.dbName, 1);
+      req.onupgradeneeded = () =&gt; {
+        const db = req.result;
+        if (!db.objectStoreNames.contains("saves")) {
+          const os = db.createObjectStore("saves", { keyPath: "id" });
+          os.createIndex("gameId", "gameId");
+          os.createIndex("updatedAt", "updatedAt");
+        }
+        if (!db.objectStoreNames.contains("meta")) {
+          db.createObjectStore("meta", { keyPath: "gameId" });
+        }
+      };
+      req.onsuccess = () =&gt; resolve(req.result);
+      req.onerror = () =&gt; reject(req.error);
+    });
+  }
+
+  // 从模拟器核心导出当前电池存档
+  extractSav(mod) {
+    // 约定导出：_nds_sav_size() / _nds_export_sav(ptr, size)
+    const size = mod._nds_sav_size();
+    const ptr = mod._malloc(size);
+    mod._nds_export_sav(ptr, size);
+    const bytes = new Uint8Array(mod.HEAPU8.buffer, ptr, size).slice();
+    mod._free(ptr);
+    return bytes; // 通常可直接作为 .sav 文件下载
+  }
+
+  async putLocal({ gameId, romName, bytes, revision = 0 }) {
+    const db = await this.dbPromise;
+    const record = {
+      id: gameId + ":local",
+      gameId,
+      romName,
+      bytes,
+      revision,
+      updatedAt: Date.now(),
+    };
+    return new Promise((resolve, reject) =&gt; {
+      const tx = db.transaction("saves", "readwrite");
+      tx.objectStore("saves").put(record);
+      tx.oncomplete = () =&gt; resolve(record);
+      tx.onerror = () =&gt; reject(tx.error);
+    });
+  }
+
+  async getLocal(gameId) {
+    const db = await this.dbPromise;
+    return new Promise((resolve, reject) =&gt; {
+      const tx = db.transaction("saves", "readonly");
+      const req = tx.objectStore("saves").get(gameId + ":local");
+      req.onsuccess = () =&gt; resolve(req.result || null);
+      req.onerror = () =&gt; reject(req.error);
+    });
+  }
+
+  exportFile(bytes, filename = "game.sav") {
+    const blob = new Blob([bytes], { type: "application/octet-stream" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  async importFile(file, gameId, mod) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // 回写核心，使当前会话立即使用该存档
+    const ptr = mod._malloc(bytes.length);
+    mod.HEAPU8.set(bytes, ptr);
+    mod._nds_import_sav(ptr, bytes.length);
+    mod._free(ptr);
+    await this.putLocal({ gameId, romName: file.name, bytes });
+  }
+}
+
+// 与桥接层串起来：游戏内保存后防抖写入
+export function attachAutoSave(bridge, store, gameId) {
+  let timer = 0;
+  bridge.onFrame(() =&gt; {
+    // 也可以改为定时 5s 轮询导出，或核心提供 dirty 标志
+    clearTimeout(timer);
+    timer = setTimeout(async () =&gt; {
+      const bytes = bridge.extractSav(bridge.mod);
+      if (!bytes || bytes.length === 0) return;
+      await store.putLocal({ gameId, romName: bridge.romName, bytes });
+    }, bridge._saveDebounceMs);
+  });
+}</code></pre>
+
+        <div class="callout warn">
+          <strong>存档实现要点</strong>
+          不同游戏存档类型不同（512B / 8KB / 64KB / 256KB / 512KB flash）。导出接口必须返回<strong>真实使用的长度</strong>，
+          导入时按长度校验。另：即时存档（Save State）与电池存档（.sav）是两套东西——RA Hardcore 禁用前者，不禁用后者的游戏内保存。
+        </div>
+
+        <h3>4.3 Java 后端存档 API（含版本冲突）</h3>
+        <pre><code>// SaveSyncController.java —— Spring Boot 3 骨架
+@RestController
+@RequestMapping("/api/saves")
+@RequiredArgsConstructor
+public class SaveSyncController {
+
+    private final SaveSyncService saveSyncService;
+
+    /** 列表：仅返回元数据，避免大文件打爆带宽 */
+    @GetMapping
+    public List&lt;SaveMetaDto&gt; list(Authentication auth) {
+        return saveSyncService.listSaves(userId(auth));
+    }
+
+    /** 下载：带 ETag，便于客户端条件请求 */
+    @GetMapping("/{gameId}/blob")
+    public ResponseEntity&lt;Resource&gt; download(
+            @PathVariable String gameId,
+            @RequestHeader(value = "If-None-Match", required = false) String inm,
+            Authentication auth) {
+        SaveBlob blob = saveSyncService.openBlob(userId(auth), gameId);
+        String etag = "\"" + blob.revision() + "\"";
+        if (etag.equals(inm)) {
+            return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(etag).build();
+        }
+        return ResponseEntity.ok()
+                .eTag(etag)
+                .header("X-Save-Revision", String.valueOf(blob.revision()))
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .body(blob.resource());
+    }
+
+    /**
+     * 上传：乐观锁。
+     * clientRevision = 客户端认为的当前版本。
+     * 若服务端更新，则 409，由客户端决定合并策略。
+     */
+    @PutMapping("/{gameId}/blob")
+    public ResponseEntity&lt;SaveMetaDto&gt; upload(
+            @PathVariable String gameId,
+            @RequestHeader("If-Match") long clientRevision,
+            @RequestBody byte[] payload,
+            Authentication auth) {
+        try {
+            SaveMetaDto meta = saveSyncService.save(
+                    userId(auth), gameId, clientRevision, payload);
+            return ResponseEntity.ok(meta);
+        } catch (RevisionConflictException ex) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .header("X-Server-Revision", String.valueOf(ex.serverRevision()))
+                    .body(null); // 也可返回 {serverRevision, serverUpdatedAt} JSON
+        }
+    }
+
+    private String userId(Authentication auth) {
+        return (String) auth.getPrincipal();
+    }
+}</code></pre>
+
+        <pre><code>// SaveSyncService.java —— 冲突与存储骨架
+@Service
+@RequiredArgsConstructor
+public class SaveSyncService {
+
+    private final SaveMetaRepository metaRepo;
+    private final SaveBlobStore blobStore; // MinIO / S3 / 或 PG
+
+    @Transactional
+    public SaveMetaDto save(String userId, String gameId, long clientRevision, byte[] payload) {
+        if (payload.length &gt; 8 * 1024 * 1024) {
+            throw new IllegalArgumentException("save too large");
+        }
+        SaveMeta meta = metaRepo.findByUserIdAndGameId(userId, gameId)
+                .orElseGet(() -&gt; SaveMeta.builder()
+                        .userId(userId).gameId(gameId).revision(0L)
+                        .build());
+
+        // 关键：乐观锁检查，防止两端互相覆盖
+        if (meta.getRevision() != clientRevision) {
+            throw new RevisionConflictException(meta.getRevision());
+        }
+
+        long next = meta.getRevision() + 1;
+        String key = String.format("saves/%s/%s/%d.sav", userId, gameId, next);
+        blobStore.put(key, payload);
+
+        meta.setRevision(next);
+        meta.setByteSize(payload.length);
+        meta.setSha256(sha256(payload));
+        meta.setUpdatedAt(Instant.now());
+        meta.setStorageKey(key);
+        metaRepo.save(meta);
+        return SaveMetaDto.from(meta);
+    }
+
+    public SaveBlob openBlob(String userId, String gameId) {
+        SaveMeta meta = metaRepo.findByUserIdAndGameId(userId, gameId)
+                .orElseThrow(NotFoundException::new);
+        return new SaveBlob(meta.getRevision(), blobStore.open(meta.getStorageKey()));
+    }
+
+    public List&lt;SaveMetaDto&gt; listSaves(String userId) {
+        return metaRepo.findByUserId(userId).stream().map(SaveMetaDto::from).toList();
+    }
+
+    private static String sha256(byte[] data) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(md.digest(data));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+}</code></pre>
+
+        <pre><code>// 表结构示意（PostgreSQL）
+/*
+create table save_meta (
+  user_id      text        not null,
+  game_id      text        not null,
+  revision     bigint      not null default 0,
+  byte_size    int         not null,
+  sha256       text        not null,
+  storage_key  text        not null,
+  updated_at   timestamptz not null default now(),
+  primary key (user_id, game_id)
+);
+create index on save_meta (user_id, updated_at desc);
+*/</code></pre>
+
+        <h3>4.4 rcheevos rc_client：评估与上报</h3>
+        <pre><code>// achievements/ra-client.js —— 成就评估骨架（WASM rcheevos）
+export class RaIntegration {
+  constructor({ mod, memoryReader, apiBase }) {
+    this.mod = mod;                 // rcheevos wasm 模块
+    this.memoryReader = memoryReader; // (addr, size) =&gt; Uint8Array，只读
+    this.apiBase = apiBase;         // 建议指向你的 Java 后端代理
+    this.client = null;
+    this.mode = "softcore";         // hardcore | softcore | off
+  }
+
+  async login(username, password) {
+    // 不要把 RA 密码直连浏览器到 RA；走你的后端，由后端调 RA Web API
+    const res = await fetch(this.apiBase + "/ra/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("RA login failed");
+    this.session = await res.json(); // 含 token 由后端保管/下发短期凭证
+  }
+
+  async identifyAndLoadGame(romBytes) {
+    // 1) 用 RA 认可的哈希算法计算 ROM 哈希（务必与 RA 文档一致）
+    const hash = await computeRaRomHash(romBytes);
+    // 2) 查询该游戏是否有成就
+    const info = await fetch(this.apiBase + "/ra/game?hash=" + hash).then(r =&gt; r.json());
+    if (!info || !info.gameId) {
+      this.game = null;
+      return { supported: false, hash, reason: "hash-not-in-ra-db" };
+    }
+    this.game = info;
+    // 3) 初始化 rc_client 并加载成就定义（可通过后端缓存 rapi 数据）
+    this.client = this.mod.rc_client_new(this.memoryReader, this.session);
+    this.mod.rc_client_load_game(this.client, info.gameId, null, 0);
+    return { supported: true, game: info, hash };
+  }
+
+  // 每帧末调用：读内存 -&gt; 求值 -&gt; 回调解锁
+  pumpFrame() {
+    if (!this.client || this.mode === "off") return;
+    const events = this.mod.rc_client_do_frame(this.client);
+    for (const ev of events || []) {
+      if (ev.type === "unlock") {
+        this.onUnlock &amp;&amp; this.onUnlock(ev.achievement);
+        this.reportUnlock(ev.achievement.id);
+      } else if (ev.type === "game-complete") {
+        this.onGameComplete &amp;&amp; this.onGameComplete();
+      }
+    }
+  }
+
+  async reportUnlock(achievementId) {
+    // 本地先记一笔，再异步上报，失败重试
+    await this.persistLocalUnlock(achievementId);
+    await fetch(this.apiBase + "/ra/unlock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        achievementId,
+        hardcore: this.mode === "hardcore",
+        when: new Date().toISOString(),
+      }),
+      credentials: "include",
+    });
+  }
+
+  setMode(mode) {
+    // hardcore 强制关闭即时存档/快进/作弊入口
+    this.mode = mode;
+  }
+
+  onUnlock = null;
+  onGameComplete = null;
+}
+
+// 只读内存适配器 —— 绝不要暴露写接口
+function makeMemoryReader(mod) {
+  return (address, size) =&gt; {
+    // 从 melonDS 导出只读 peek；address 为 NDS 体系结构地址
+    const ptr = mod._nds_peek(address, size);
+    return new Uint8Array(mod.HEAPU8.buffer, ptr, size).slice();
+  };
+}</code></pre>
+
+        <div class="callout danger">
+          <strong>反作弊实现约束</strong>
+          成就层只允许 <code>peek/read</code>。任何 <code>poke/write</code> 不得对成就逻辑开放。
+          Hardcore 模式必须同时：禁用 Save State、禁用快进、禁用作弊、使用快速重置（Quick Reset）策略（以 RA 文档为准）。
+          上报走服务端可避免浏览器直接持有 RA 密码，也便于做审计。
+        </div>
+      </section>
+
+      <!-- ========== 5. 合规 ========== -->
+      <section class="card" id="compliance">
+        <h2>5. 中文 ROM 与 RA 合规处理方案</h2>
+        <p class="section-lead">
+          这是你特别强调的部分：产品能力应当是「识别 + 引导 + 官方补哈希」，绝不是「骗过哈希」。
+        </p>
+
+        <h3>5.1 现实规则（务必写进产品文案）</h3>
+        <ul>
+          <li>RA 成就绑定的是<strong>已登记 ROM 哈希</strong>，不是游戏剧情进度本身。</li>
+          <li>中文汉化 ROM 哈希与英文原版不同，通常<strong>默认不在</strong> RA 数据库。</li>
+          <li>官方认可的汉化途径：把汉化补丁作为 <strong>translation patch</strong> 申请<strong>新增哈希</strong>，由成就开发者/审核添加。</li>
+          <li>禁止：拿英文 ROM 哈希「贴牌」中文 ROM、双开 ROM 同步进度、改内存解锁。</li>
+        </ul>
+
+        <h3>5.2 UI 引导流程（推荐交互）</h3>
+        <div class="diagram" role="img" aria-label="中文 ROM 与 RA 合规引导流程">
+          <svg viewBox="0 0 680 320" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <marker id="arrow2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6" fill="none" stroke="#2563eb" stroke-width="1.2"/>
+              </marker>
+            </defs>
+            <rect width="680" height="320" fill="#fafafa"/>
+            <rect x="30" y="40" width="140" height="48" rx="8" fill="#eef4ff" stroke="#2563eb"/>
+            <text x="100" y="68" text-anchor="middle" font-size="12" fill="#1c1917">用户加载 ROM</text>
+
+            <rect x="210" y="40" width="160" height="48" rx="8" fill="#eef4ff" stroke="#2563eb"/>
+            <text x="290" y="68" text-anchor="middle" font-size="12" fill="#1c1917">计算 RA 哈希</text>
+
+            <rect x="410" y="20" width="230" height="40" rx="8" fill="#ecfdf5" stroke="#0f766e"/>
+            <text x="525" y="45" text-anchor="middle" font-size="12" fill="#0f766e">哈希在 RA 库 → 正常启用成就</text>
+
+            <rect x="410" y="78" width="230" height="40" rx="8" fill="#fffbeb" stroke="#b45309"/>
+            <text x="525" y="103" text-anchor="middle" font-size="12" fill="#b45309">哈希不在库 → 进入引导页</text>
+
+            <rect x="60" y="160" width="560" height="130" rx="10" fill="#fff" stroke="#ddd6cc"/>
+            <text x="90" y="190" font-size="12" font-weight="600" fill="#1c1917">引导页展示：</text>
+            <text x="90" y="214" font-size="12" fill="#1c1917">1. 显示文件哈希与建议核对地址（RA 游戏页）</text>
+            <text x="90" y="236" font-size="12" fill="#1c1917">2. 说明：汉化 ROM 需翻译补丁新哈希，由官方添加</text>
+            <text x="90" y="258" font-size="12" fill="#1c1917">3. 提供申请步骤链接 / 模板文案；成就面板显示「未获官方支持」</text>
+            <text x="90" y="280" font-size="12" fill="#b91c1c">绝不提供：哈希伪造、双 ROM 同步、内存修改按钮</text>
+
+            <line x1="170" y1="64" x2="210" y2="64" stroke="#2563eb" marker-end="url(#arrow2)"/>
+            <line x1="370" y1="50" x2="410" y2="45" stroke="#2563eb" marker-end="url(#arrow2)"/>
+            <line x1="370" y1="78" x2="410" y2="95" stroke="#2563eb" marker-end="url(#arrow2)"/>
+            <line x1="525" y1="118" x2="340" y2="160" stroke="#b45309" stroke-dasharray="4 3" marker-end="url(#arrow2)"/>
+          </svg>
+        </div>
+
+        <h3>5.3 前端文案骨架（可直接放进设置/成就页）</h3>
+        <pre><code>&lt;!-- compliance.html 片段 --&gt;
+&lt;section class="ra-guide"&gt;
+  &lt;h3&gt;当前 ROM 成就支持状态&lt;/h3&gt;
+  &lt;p id="ra-status"&gt;正在识别 ROM 哈希…&lt;/p&gt;
+
+  &lt;div id="ra-ok" hidden&gt;
+    &lt;p&gt;该 ROM 哈希已在 RetroAchievements 数据库中，可以正常解锁成就。&lt;/p&gt;
+    &lt;p&gt;&lt;a href="https://retroachievements.org/game/…" target="_blank" rel="noreferrer"&gt;
+      在 RA 网站查看成就列表
+    &lt;/a&gt;&lt;/p&gt;
+  &lt;/div&gt;
+
+  &lt;div id="ra-missing" hidden&gt;
+    &lt;p&gt;未在 RA 数据库中找到该 ROM 哈希。若这是&lt;strong&gt;翻译/汉化补丁版&lt;/strong&gt;：&lt;/p&gt;
+    &lt;ol&gt;
+      &lt;li&gt;记录下方哈希，并到 RA 对应游戏页核对是否已有 translation patch 条目。&lt;/li&gt;
+      &lt;li&gt;若无，请按 RA 官方流程向成就开发者申请：将你的补丁版本登记为新哈希。&lt;/li&gt;
+      &lt;li&gt;在官方添加哈希前，成就功能保持锁定——这是为了公平与合规。&lt;/li&gt;
+    &lt;/ol&gt;
+    &lt;p&gt;文件哈希：&lt;code id="rom-hash"&gt;&lt;/code&gt;&lt;/p&gt;
+    &lt;p class="warn"&gt;
+      本站不提供哈希伪造、双 ROM 同步或内存修改。此类操作违反 RA 规则。
+    &lt;/p&gt;
+  &lt;/div&gt;
+&lt;/section&gt;</code></pre>
+
+        <h3>5.4 申请「翻译补丁哈希」时给用户的模板</h3>
+        <pre><code>主题：Translation patch hash request — &lt;Game Name&gt; (NDS)
+
+你好，我使用的是 &lt;游戏名&gt; 的中文翻译补丁版本。
+希望申请将以下补丁版本登记为新的 translation patch 哈希，以便成就可按规则解锁。
+
+- 原版游戏（英文）：&lt;名称 / 平台 NDS&gt;
+- 补丁名称/版本：&lt;补丁作者 / 版本号&gt;
+- 应用补丁后的文件哈希：&lt;RA 算法哈希，完整十六进制&gt;
+- 补丁下载/发布页：&lt;链接&gt;
+- 说明：仅补丁文本，无玩法修改/未解锁内容
+
+感谢审核。</code></pre>
+
+        <div class="callout ok">
+          <strong>产品策略建议</strong>
+          在成就页顶部常驻「支持状态徽章」：绿色（RA 已支持）/ 琥珀（可申请翻译哈希）/ 灰色（不支持成就但可玩）。
+          让用户第一眼知道：游戏能玩 ≠ 成就能解。把期望管理做在前面，后续支持成本会小很多。
+        </div>
+      </section>
+
+      <!-- ========== 6. 部署 ========== -->
+      <section class="card" id="deploy">
+        <h2>6. 部署方案</h2>
+        <p class="section-lead">
+          前端静态托管与 Java 服务分离。WASM 需要正确的 MIME 与缓存策略；跨域按你的鉴权方式配置。
+        </p>
+
+        <h3>6.1 推荐拓扑</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>组件</th>
+                <th>推荐</th>
+                <th>配置要点</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>前端静态站</td>
+                <td>Cloudflare Pages / Vercel</td>
+                <td>上传 <code>index.html</code> 产物；缓存 <code>.wasm</code> 为 <code>application/wasm</code></td>
+              </tr>
+              <tr>
+                <td>Java API</td>
+                <td>Railway / Fly.io / 云主机 + Docker</td>
+                <td>HTTPS 强制；健康检查 <code>/actuator/health</code></td>
+              </tr>
+              <tr>
+                <td>数据库</td>
+                <td>Neon / Supabase Postgres 或自建</td>
+                <td>自动备份；连接池（HikariCP）</td>
+              </tr>
+              <tr>
+                <td>对象存储</td>
+                <td>MinIO 自建 或 Cloudflare R2</td>
+                <td>按用户前缀隔离；生命周期策略可选</td>
+              </tr>
+              <tr>
+                <td>密钥</td>
+                <td>环境变量 / 平台 Secret</td>
+                <td>RA API 密钥只存在于后端</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>6.2 前端（Cloudflare Pages 示例）</h3>
+        <pre><code># 构建后目录结构
+dist/
+  index.html
+  styles.css
+  app.js
+  emu/melon-bridge.js
+  emu/melon.wasm
+  emu/melon.js
+  vendor/rcheevos.js
+  vendor/rcheevos.wasm
+
+# 建议 headers（_headers 或平台等价配置）
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer-when-downgrade
+/*.wasm
+  Content-Type: application/wasm
+  Cache-Control: public, max-age=31536000, immutable
+/*.js
+  Cache-Control: public, max-age=3600</code></pre>
+
+        <h3>6.3 Java 后端（Docker Compose 本地/服务器）</h3>
+        <pre><code># docker-compose.yml
+services:
+  api:
+    build: ./api
+    ports: ["8080:8080"]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/ndsweb
+      SPRING_DATASOURCE_USERNAME: ndsweb
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      RA_API_BASE: https://retroachievements.org/API
+      RA_API_KEY: ${RA_API_KEY}   # 仅后端持有
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on: [db, minio]
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ndsweb
+      POSTGRES_USER: ndsweb
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    volumes: ["miniodata:/data"]
+
+volumes:
+  pgdata:
+  miniodata:</code></pre>
+
+        <h3>6.4 API 契约（先定契约再写页面）</h3>
+        <pre><code>POST /api/auth/register     {email, password} → {userId, token}
+POST /api/auth/login        {email, password} → {userId, token}
+
+GET  /api/saves             → [{gameId, revision, updatedAt, sha256, size}]
+GET  /api/saves/{gameId}/blob → bytes + ETag + X-Save-Revision
+PUT  /api/saves/{gameId}/blob
+     Headers: If-Match: &lt;clientRevision&gt;
+     Body: binary
+     200 → {gameId, revision: n+1}
+     409 → {serverRevision, serverUpdatedAt}
+
+POST /api/ra/login          {raUsername, raPassword} → session（后端代存）
+GET  /api/ra/game?hash=     → {gameId, title, officialUrl} | 404
+POST /api/ra/unlock         {achievementId, hardcore} → 202</code></pre>
+
+        <h3>6.5 最小 nginx 片段（若自建静态 + 反代）</h3>
+        <pre><code>server {
+  listen 443 ssl;
+  server_name play.example.com;
+
+  root /var/www/nds-web;
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+  location ~* \.wasm$ {
+    add_header Content-Type application/wasm;
+    expires 30d;
+  }
+  location /api/ {
+    proxy_pass http://127.0.0.1:8080/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  }
+}</code></pre>
+      </section>
+
+      <!-- ========== 7. 风险 ========== -->
+      <section class="card" id="risks">
+        <h2>7. 风险与注意事项</h2>
+        <p class="section-lead">
+          这些坑大多会直接造成「丢档」或「成就失效」，建议在设计阶段就留好对策。
+        </p>
+
+        <h3>7.1 技术风险</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>风险</th>
+                <th>影响</th>
+                <th>缓解措施</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>IndexedDB 被浏览器驱逐</td>
+                <td>本地存档丢失</td>
+                <td>及时云同步；提示用户导出 <code>.sav</code>；用 <code>navigator.storage.persist()</code> 申请持久化存储</td>
+              </tr>
+              <tr>
+                <td>WASM 性能不足</td>
+                <td>掉帧、音画不同步</td>
+                <td>关闭调试层；降低滤镜；优先 Chromium；必要时降低音频采样率；避免每帧 JS 大拷贝</td>
+              </tr>
+              <tr>
+                <td>帧缓冲拷贝开销</td>
+                <td>CPU 打满</td>
+                <td>用 WebGL 纹理直传；零拷贝视图；双缓冲</td>
+              </tr>
+              <tr>
+                <td>存档时序竞态</td>
+                <td>坏档/半份写入</td>
+                <td>核心「导出为原子快照」；IndexedDB 事务提交后再标成功；云端写临时 key 再切换</td>
+              </tr>
+              <tr>
+                <td>多端同时写</td>
+                <td>进度回退</td>
+                <td>严格 revision 乐观锁；冲突 UI 必选；禁止自动 last-write-wins 覆盖</td>
+              </tr>
+              <tr>
+                <td>ROM 哈希算法不一致</td>
+                <td>RA 无法识别</td>
+                <td>严格按 RA 文档实现哈希；用已知英文原版样本做测试向量</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>7.2 RA 规则与产品风险</h3>
+        <ul>
+          <li><strong>Hardcore 限制</strong>：禁 Save State、禁作弊、禁快进（以官方最新规则为准）。你的 UI 在 Hardcore 下必须隐藏/禁用这些入口，而不是只在上报时忽略。</li>
+          <li><strong>反作弊审查</strong>：出现「内存编辑解锁成就」会连带账号风险。代码评审时把 <code>poke/write</code> 列为禁用符号。</li>
+          <li><strong>汉化预期管理</strong>：社区常见投诉是「为什么中文版不解锁」。文案、论坛置顶、成就页状态徽章要一致。</li>
+          <li><strong>API 限流与密钥泄露</strong>：RA 调用走后端代理；密钥只在服务端；对 unlock 做幂等与速率限制。</li>
+          <li><strong>法律与分发</strong>：绝不上传用户 ROM 到服务器做「云端模拟」（除非有明确授权）；演示站只用无版权争议材料。</li>
+        </ul>
+
+        <h3>7.3 浏览器兼容</h3>
+        <ul>
+          <li>首要目标：桌面 Chrome / Edge；次目标：Firefox、Safari。</li>
+          <li>移动端：触摸映射可玩，但 NDS 双屏小屏体验差；建议横屏布局 + 虚拟按键。</li>
+          <li>iOS Safari 对 WASM/音频有限制，需单独验收。</li>
+        </ul>
+
+        <div class="callout warn">
+          <strong>最容易被低估的一条</strong>
+          「本地存档」和「云存档」如果用两套不一致的 revision 逻辑，会互相覆盖。
+          请把 <strong>单一 Save Model</strong>（本地记录也带 revision）从 P1 就定下来，P3 只是增加远端指针，而不是重写模型。
+        </div>
+      </section>
+
+      <!-- ========== 8. 替代方案 ========== -->
+      <section class="card" id="alternatives">
+        <h2>8. 省力替代方案（当现有栈难扛时）</h2>
+        <p class="section-lead">
+          若某一块超出你的前端精力或工期，用这些替换策略，不要硬啃。
+        </p>
+
+        <div class="split">
+          <div class="mini-card">
+            <h4>模拟器 WASM 难编译</h4>
+            <ul>
+              <li>直接采用已验证的 Web 移植产物（合法开源协议），只做 UI 与存档桥。</li>
+              <li>或先做「桌面 melonDS + Web 仅做启动器/云存档」过渡（体验差一档但可上线）。</li>
+            </ul>
+          </div>
+          <div class="mini-card">
+            <h4>前端写不动复杂 UI</h4>
+            <ul>
+              <li>UI 做薄：加载、双屏、存档三按钮、成就列表即可。</li>
+              <li>使用成熟组件库（如 Pico.css / 简单组件），把时间留给 WASM 桥。</li>
+            </ul>
+          </div>
+          <div class="mini-card">
+            <h4>云同步想更快上线</h4>
+            <ul>
+              <li>第一版只做「上传 / 下载 / 强制选择」，不做自动合并。</li>
+              <li>存储可先用 PostgreSQL <code>bytea</code>，量上来再迁 MinIO/R2。</li>
+            </ul>
+          </div>
+          <div class="mini-card">
+            <h4>RA 集成想降风险</h4>
+            <ul>
+              <li>先做「哈希识别 + 成就列表展示」，解锁上报随后补。</li>
+              <li>上报可先支持 Softcore，Hardcore 作为第二里程碑。</li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>完全托管/半托管混合（最省人力）</h3>
+        <pre><code>方案：前端静态 + 你的 Java 只做「存档与账号」
+RA：第一期仅识别与展示（纯前端只读）
+    第二期再加后端代理上报
+
+这样即使 rcheevos WASM 集成延期，产品仍可上线获得用户反馈。</code></pre>
+
+        <div class="callout">
+          <strong>不推荐的捷径</strong>
+          用现成「云游戏模拟器」SaaS 直接套壳、或用 PHP/Node 写一份与 Java 并行的后端。
+          后者会让你的维护成本翻倍，而且与「用 Java 做后端」的初衷冲突。
+        </div>
+      </section>
+
+      <!-- ========== 9. 清单 ========== -->
+      <section class="card" id="checklist">
+        <h2>9. 启动清单（下一周就能开工）</h2>
+        <p class="section-lead">按顺序打勾。全部完成即进入 P0 开发。</p>
+        <ul class="checklist">
+          <li><span class="box"></span><span>确定 WASM 路径：先用社区移植验证，还是直接自编译 melonDS。</span></li>
+          <li><span class="box"></span><span>准备合法测试用 NDS ROM（自备，不入库不上传）与可选 BIOS/firmware。</span></li>
+          <li><span class="box"></span><span>本地搭好前端最小页：<code>index.html</code> + 双 canvas + 文件选择。</span></li>
+          <li><span class="box"></span><span>定义 <code>MelonBridge</code> 的 8 个导出函数名（load/frame/input/sav…），写进 README。</span></li>
+          <li><span class="box"></span><span>定义 Save JSON 模型：<code>{gameId, revision, bytes, updatedAt, sha256}</code>。</span></li>
+          <li><span class="box"></span><span>Spring Boot 初始化：Auth + SaveMeta 表 + 上传下载 API + 409 冲突。</span></li>
+          <li><span class="box"></span><span>Docker Compose 起 Postgres（可加 MinIO）。</span></li>
+          <li><span class="box"></span><span>写一页「RA 合规说明」草稿，包含哈希查询步骤与补丁申请模板。</span></li>
+          <li><span class="box"></span><span>为英文原版准备 1 个已知哈希的测试样本，作为 RA 识别的黄金用例。</span></li>
+          <li><span class="box"></span><span>把 Hardcore 限制清单写成产品规格：禁用项列表 + UI 行为。</span></li>
+        </ul>
+
+        <h3>建议的第一版 API 与目录结构</h3>
+        <pre><code>retroWeb/
+  index.html
+  styles.css
+  app.js
+  emu/
+    melon-bridge.js
+    melon.wasm
+    melon.js
+  storage/
+    save-store.js
+  achievements/
+    ra-client.js
+    compliance-ui.js
+  README.md
+
+api/                     # Spring Boot
+  src/main/java/.../
+    auth/
+    save/
+    ra/
+  Dockerfile
+  docker-compose.yml</code></pre>
+
+        <h3>验证命令（示例）</h3>
+        <pre><code># 前端静态预览（开发）
+# 直接用浏览器打开 index.html，或
+npx --yes serve dist
+
+# 后端
+./mvnw spring-boot:run
+# 或
+docker compose up --build
+
+# 健康检查
+curl -s http://localhost:8080/actuator/health
+
+# 存档冲突用例
+curl -X PUT http://localhost:8080/api/saves/demo/blob \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "If-Match: 0" \
+  --data-binary @game.sav</code></pre>
+
+        <div class="footer">
+          <p>
+            <strong>说明：</strong>本规划面向自建合规产品。涉及 RetroAchievements 的 API 字段、哈希算法、
+            Hardcore 细则与翻译补丁申请入口，请在开发时以官方文档与论坛公告为准（文档会更新）。
+            开源项目接口（melonDS 导出符号、rcheevos 函数名）以你实际锁定的版本为准，骨架中的名字仅表示职责。
+          </p>
+          <p>
+            已配套可运行骨架：<a href="index.html">P0 模拟器 UI</a> 与 <code>api/</code> Spring Boot 存档服务。
+            下一步建议：接入真实 melonDS WASM 导出 → 补齐 P1 自动存档联调 → 推进 P3 云同步与 P4 RA。
+          </p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="plan.js"></script>
+</body>
+</html>
